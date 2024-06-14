@@ -3,6 +3,9 @@
 """
 腾讯云轻量云自动进行快照备份
 轻量云免费提供2个快照，所以该脚本只备份两个快照
+更新 by： obaby
+https://oba.by
+https://h4ck.org.cn
 """
 
 import json
@@ -16,7 +19,7 @@ from tencentcloud.lighthouse.v20200324 import lighthouse_client, models
 
 
 
-def main(SecretId, SecretKey, region, InstanceIds, Instanceidx=1):
+def main(SecretId, SecretKey, region, InstanceIds, Instanceidx=1, KeepPolicy=2):
     """
     GOGO
     :param SecretId: str 腾讯云账号SecretId
@@ -33,15 +36,42 @@ def main(SecretId, SecretKey, region, InstanceIds, Instanceidx=1):
             # 直接备份
             CreateInstanceSnapshot(SecretId, SecretKey, region, InstanceIds)
         elif TotalCount == 2:
-            # 删除之前较早一个备份,就是列表里的第二个,状态需要正常才能删除
-            SnapshotState = (get_rest['SnapshotSet'][Instanceidx]['SnapshotState'])
-            if SnapshotState == 'NORMAL':
-                SnapshotId = (get_rest['SnapshotSet'][Instanceidx]['SnapshotId'])
-                DeleteSnapshots_re = DeleteSnapshots(SecretId, SecretKey, SnapshotId, region)
-                if DeleteSnapshots_re != False:
-                    # 删除之前一个后，再进行备份
-                    print('已经删除完成快照ID为{0}的快照，现在准备开始备份实例'.format(SnapshotId))
-                    CreateInstanceSnapshot(SecretId, SecretKey, region, InstanceIds)
+            if KeepPolicy ==1:
+                # 删除之前较早一个备份,就是列表里的第二个,状态需要正常才能删除
+                SnapshotState = (get_rest['SnapshotSet'][Instanceidx]['SnapshotState'])
+                if SnapshotState == 'NORMAL':
+                    SnapshotId = (get_rest['SnapshotSet'][Instanceidx]['SnapshotId'])
+                    DeleteSnapshots_re = DeleteSnapshots(SecretId, SecretKey, SnapshotId, region)
+                    if DeleteSnapshots_re != False:
+                        # 删除之前一个后，再进行备份
+                        print('已经删除完成快照ID为{0}的快照，现在准备开始备份实例'.format(SnapshotId))
+                        CreateInstanceSnapshot(SecretId, SecretKey, region, InstanceIds)
+            else:
+                # 使用其他保留策略 备份名称中包含 keep 或者 保留 字样的快照保留 如果都保留，按照 0 1 策略删除
+                snapshots = get_rest['SnapshotSet']
+                snapshot_id = None
+                for s in snapshots:
+                    if 'keep' in  s['SnapshotName'] or u'保留' in  s['SnapshotName']:
+                        continue
+                    else:
+                        snapshot_id = s['SnapshotId']
+                if snapshot_id is not None:
+                    print('准备删除快照ID为{0}的快照'.format(snapshot_id))
+                    DeleteSnapshots_re = DeleteSnapshots(SecretId, SecretKey, snapshot_id, region)
+                    if DeleteSnapshots_re != False:
+                        # 删除之前一个后，再进行备份
+                        print('已经删除完成快照ID为{0}的快照，现在准备开始备份实例'.format(snapshot_id))
+                        CreateInstanceSnapshot(SecretId, SecretKey, region, InstanceIds)
+                else:
+                    print('多个快照都被设置为长期保存，根据删除策略进行快照删除')
+                    SnapshotState = (get_rest['SnapshotSet'][Instanceidx]['SnapshotState'])
+                    if SnapshotState == 'NORMAL':
+                        SnapshotId = (get_rest['SnapshotSet'][Instanceidx]['SnapshotId'])
+                        DeleteSnapshots_re = DeleteSnapshots(SecretId, SecretKey, SnapshotId, region)
+                        if DeleteSnapshots_re != False:
+                            # 删除之前一个后，再进行备份
+                            print('已经删除完成快照ID为{0}的快照，现在准备开始备份实例'.format(SnapshotId))
+                            CreateInstanceSnapshot(SecretId, SecretKey, region, InstanceIds)
         else:
             print('当前快照数量存在问题，请登录腾讯云后台检查并删除多余的快照后操作')
             time.sleep(5)
@@ -153,6 +183,8 @@ def main_handler(event, context):
 
     # 0: 删除最新的保留最早的备份，这样可以有一个固定备份，1: 删除最早,默认 1
     Instanceidx = os.environ.get('Instanceidx')
+    # 快照保留策略 1：默认删除逻辑 根据上述删除策略进行快照删除 2：保留特定扩展名的快照，如果都包含按照上述删除策略删除快照
+    KeepPolicy = os.environ.get('KeepPolicy')
 
     # 执行
     nowtime = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
@@ -162,5 +194,5 @@ def main_handler(event, context):
         InstanceIds = r.split(":")[1]
         for id in InstanceIds.split(","):
             print('Region: '+Region+'InstanceId: '+id+'\n')
-            main(SecretId, SecretKey, Region, id, int(Instanceidx))
+            main(SecretId, SecretKey, Region, id, int(Instanceidx), int(KeepPolicy))
     return True
